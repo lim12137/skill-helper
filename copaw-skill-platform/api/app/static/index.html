@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CoPaw Skill Platform</title>
+    <style>
+      :root {
+        --bg: #f6f8f2;
+        --card: #ffffff;
+        --line: #d8ddce;
+        --text: #1b1f17;
+        --muted: #5e6652;
+        --accent: #346b3c;
+      }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        color: var(--text);
+        background: radial-gradient(circle at 20% 0%, #dce8ca, var(--bg) 45%);
+      }
+      .wrap {
+        max-width: 1100px;
+        margin: 24px auto;
+        padding: 0 14px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 320px 1fr;
+        gap: 12px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 12px;
+      }
+      input, textarea, select, button {
+        width: 100%;
+        box-sizing: border-box;
+        margin: 6px 0;
+        padding: 8px;
+        border-radius: 8px;
+        border: 1px solid #cfd5c1;
+        font: inherit;
+      }
+      textarea { min-height: 120px; }
+      button {
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: #7d866f;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .skill-item {
+        border: 1px solid #d5dac9;
+        border-radius: 8px;
+        padding: 8px;
+        margin-bottom: 8px;
+      }
+      .muted { color: var(--muted); font-size: 12px; }
+      pre {
+        white-space: pre-wrap;
+        background: #f3f5ed;
+        border-radius: 8px;
+        padding: 8px;
+      }
+      @media (max-width: 900px) {
+        .grid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h2>CoPaw Skill Platform (Docker MVP)</h2>
+      <p class="muted">支持多用户登录、技能创建/修改、版本化和模拟运行任务。</p>
+      <div class="grid">
+        <div class="card">
+          <h3>账号</h3>
+          <input id="email" placeholder="email" />
+          <input id="password" type="password" placeholder="password (>=6)" />
+          <div class="row">
+            <button onclick="registerUser()">注册</button>
+            <button class="secondary" onclick="loginUser()">登录</button>
+          </div>
+          <pre id="authInfo">未登录</pre>
+        </div>
+        <div class="card">
+          <h3>创建技能</h3>
+          <input id="newName" placeholder="skill name" />
+          <input id="newDesc" placeholder="description" />
+          <select id="newVis">
+            <option value="private">private</option>
+            <option value="shared">shared</option>
+            <option value="public">public</option>
+          </select>
+          <textarea id="newSkillMd">---
+name: sample-skill
+description: sample
+---
+
+# Sample Skill</textarea>
+          <textarea id="newYaml">interface:
+  display_name: "Sample"
+  short_description: "sample"
+  default_prompt: "Use $sample-skill to help."</textarea>
+          <button onclick="createSkill()">创建技能</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 12px">
+        <h3>技能列表</h3>
+        <button onclick="loadSkills()">刷新</button>
+        <div id="skills"></div>
+      </div>
+
+      <div class="card" style="margin-top: 12px">
+        <h3>编辑与运行</h3>
+        <input id="editSkillId" placeholder="skill id" />
+        <input id="editDesc" placeholder="new description" />
+        <select id="editVis">
+          <option value="">visibility unchanged</option>
+          <option value="private">private</option>
+          <option value="shared">shared</option>
+          <option value="public">public</option>
+        </select>
+        <textarea id="editSkillMd" placeholder="new SKILL.md (optional)"></textarea>
+        <textarea id="editYaml" placeholder="new openai.yaml (optional)"></textarea>
+        <div class="row">
+          <button onclick="updateSkill()">提交修改（新版本）</button>
+          <button class="secondary" onclick="showSkill()">查看详情</button>
+        </div>
+        <textarea id="runInput" placeholder="run input text"></textarea>
+        <div class="row">
+          <button onclick="runSkill()">运行技能</button>
+          <button class="secondary" onclick="pollJob()">查询任务</button>
+        </div>
+        <input id="jobId" placeholder="job id" />
+        <pre id="detailOut"></pre>
+      </div>
+    </div>
+
+    <script>
+      const api = "";
+      let token = localStorage.getItem("token") || "";
+
+      function setAuthInfo(text) {
+        document.getElementById("authInfo").textContent = text;
+      }
+      function headers() {
+        const h = { "Content-Type": "application/json" };
+        if (token) h["Authorization"] = `Bearer ${token}`;
+        return h;
+      }
+      async function req(path, method = "GET", body = null) {
+        const res = await fetch(api + path, {
+          method,
+          headers: headers(),
+          body: body ? JSON.stringify(body) : null
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(JSON.stringify(data));
+        return data;
+      }
+
+      async function registerUser() {
+        try {
+          const data = await req("/auth/register", "POST", {
+            email: email.value.trim(),
+            password: password.value
+          });
+          setAuthInfo("注册成功: " + data.email);
+        } catch (e) {
+          setAuthInfo(String(e));
+        }
+      }
+
+      async function loginUser() {
+        try {
+          const data = await req("/auth/login", "POST", {
+            email: email.value.trim(),
+            password: password.value
+          });
+          token = data.access_token;
+          localStorage.setItem("token", token);
+          const me = await req("/auth/me");
+          setAuthInfo("已登录: " + me.email + " (id=" + me.id + ")");
+        } catch (e) {
+          setAuthInfo(String(e));
+        }
+      }
+
+      async function createSkill() {
+        try {
+          const data = await req("/skills", "POST", {
+            name: newName.value.trim(),
+            description: newDesc.value,
+            visibility: newVis.value,
+            skill_md: newSkillMd.value,
+            openai_yaml: newYaml.value
+          });
+          detailOut.textContent = JSON.stringify(data, null, 2);
+          editSkillId.value = data.skill.id;
+          loadSkills();
+        } catch (e) {
+          detailOut.textContent = String(e);
+        }
+      }
+
+      async function loadSkills() {
+        try {
+          const list = await req("/skills");
+          skills.innerHTML = "";
+          list.forEach(s => {
+            const div = document.createElement("div");
+            div.className = "skill-item";
+            div.innerHTML = `<b>#${s.id} ${s.name}</b> <span class="muted">${s.visibility}</span><br/>${s.description}`;
+            div.onclick = () => { editSkillId.value = s.id; };
+            skills.appendChild(div);
+          });
+        } catch (e) {
+          skills.innerHTML = "<pre>" + String(e) + "</pre>";
+        }
+      }
+
+      async function showSkill() {
+        try {
+          const data = await req(`/skills/${editSkillId.value}`);
+          detailOut.textContent = JSON.stringify(data, null, 2);
+        } catch (e) {
+          detailOut.textContent = String(e);
+        }
+      }
+
+      async function updateSkill() {
+        try {
+          const body = {};
+          if (editDesc.value) body.description = editDesc.value;
+          if (editVis.value) body.visibility = editVis.value;
+          if (editSkillMd.value) body.skill_md = editSkillMd.value;
+          if (editYaml.value) body.openai_yaml = editYaml.value;
+          const data = await req(`/skills/${editSkillId.value}`, "PUT", body);
+          detailOut.textContent = JSON.stringify(data, null, 2);
+          loadSkills();
+        } catch (e) {
+          detailOut.textContent = String(e);
+        }
+      }
+
+      async function runSkill() {
+        try {
+          const data = await req(`/skills/${editSkillId.value}/run`, "POST", {
+            input_text: runInput.value
+          });
+          jobId.value = data.id;
+          detailOut.textContent = JSON.stringify(data, null, 2);
+        } catch (e) {
+          detailOut.textContent = String(e);
+        }
+      }
+
+      async function pollJob() {
+        try {
+          const data = await req(`/jobs/${jobId.value}`);
+          detailOut.textContent = JSON.stringify(data, null, 2);
+        } catch (e) {
+          detailOut.textContent = String(e);
+        }
+      }
+    </script>
+  </body>
+  </html>
